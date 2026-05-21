@@ -20,8 +20,8 @@ QQ 群 ←→ NapCat (QQ 协议桥接) ←→ AstrBot (AI 处理) ←→ LLM API
 
 ```bash
 # 1. 克隆仓库
-git clone <你的仓库地址>
-cd qq-group-summary-bot
+git clone https://github.com/245916893-maker/Chatbot.git
+cd Chatbot
 
 # 2. 配置 LLM API Key
 # 方式一：通过 QQ 群里发命令

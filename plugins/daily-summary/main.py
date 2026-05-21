@@ -85,7 +85,7 @@ def _save_config(cfg: dict):
 
 
 @register("daily-summary", "WorkBuddy", "QQ群每日聊天总结：自动收集消息并生成每日摘要", "1.0.0",
-          "https://github.com/245916893-maker/qq-group-summary-bot")
+          "https://github.com/245916893-maker/Chatbot")
 class DailySummary(Star):
     def __init__(self, context: Context):
         super().__init__(context)

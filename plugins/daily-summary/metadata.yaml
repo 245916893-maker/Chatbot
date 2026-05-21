@@ -2,4 +2,4 @@ name: daily-summary
 desc: "QQ群每日聊天总结插件：自动收集群消息，每天定时生成昨日讨论摘要"
 version: 1.0.0
 author: WorkBuddy
-repo: https://github.com/245916893-maker/qq-group-summary-bot
+repo: https://github.com/245916893-maker/Chatbot
