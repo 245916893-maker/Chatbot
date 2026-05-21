@@ -1,0 +1,39 @@
+version: "3.8"
+
+services:
+  napcat:
+    image: napneko/napcat-docker:latest
+    container_name: napcat
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+      - "6099:6099"
+    volumes:
+      - ./napcat/data:/app/.napcat
+      - ./napcat/QQ:/app/QQ
+    environment:
+      - ACCOUNT=${QQ_ACCOUNT:-}
+      - WSR_URL=${NAPCAT_WSR_URL:-}
+    networks:
+      - bot-net
+
+  astrbot:
+    image: soulter/astrbot:latest
+    container_name: astrbot
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./astrbot/data:/AstrBot/data
+      - ./plugins/:/AstrBot/data/plugins
+    environment:
+      - ASTRBOT_UID=${ASTRBOT_UID:-1}
+      - ASTRBOT_GID=${ASTRBOT_GID:-1}
+    depends_on:
+      - napcat
+    networks:
+      - bot-net
+
+networks:
+  bot-net:
+    driver: bridge
