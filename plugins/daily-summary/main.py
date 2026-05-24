@@ -1,4 +1,4 @@
-""""每日群聊总结插件 - 主模块"""
+"""每日群聊总结插件 - 主模块"""
 import os
 import sqlite3
 import asyncio
@@ -32,6 +32,10 @@ DB_PATH = DB_DIR / "messages.db"
 CONFIG_PATH = Path(__file__).parent / "config.json"
 ACTIVE_TIMEZONE = DEFAULT_CONFIG["timezone"]
 
+DATE_ARG_PATTERN = r"(?:今天|昨天|昨日|前天|大前天|\d+天前|\d{4}-\d{2}-\d{2})"
+TIME_ARG_PATTERN = r"(?:[01]?\d|2[0-3]):[0-5]\d"
+RANGE_SEPARATOR_PATTERN = r"(?:到|至|~|～|-|–|—)"
+
 
 def _get_local_tz():
     try:
@@ -55,11 +59,11 @@ def _timestamp_to_local(timestamp: str) -> datetime:
 def _build_summary_prompt(msgs: list[dict], period_label: str = "昨日") -> str:
     lines = []
     for m in msgs:
-        t = _timestamp_to_local(m["timestamp"]).strftime("%H:%M")
+        t = _timestamp_to_local(m["timestamp"]).strftime("%m-%d %H:%M")
         lines.append(f"[{t}] {m['user_name']}: {m['content']}")
     chat_log = "\n".join(lines)
 
-    return f"""请总结以下QQ群聊记录，用中文生成一份简洁的{period_label}摘要。要求：
+    return f"""请总结以下QQ 群聊记录，用中文生成一份简洁的{period_label}摘要。要求：
 
 📌 **主要话题** — 列出{period_label}讨论最多的2-5个话题，每个一句话概括
 😂 **有趣发言** — 摘录1-3条有意思的发言或梗
@@ -108,15 +112,15 @@ def _save_config(cfg: dict):
 
 
 def _parse_date_arg(arg: str) -> tuple[str, str]:
-    yesterday = "\u6628\u65e5"
-    before_yesterday = "\u524d\u5929"
-    two_days_before = "\u5927\u524d\u5929"
-    day_suffix = "\u5929\u524d"
-    today = "\u4eca\u5929"
+    yesterday = "昨日"
+    before_yesterday = "前天"
+    two_days_before = "大前天"
+    day_suffix = "天前"
+    today = "今天"
 
     aliases = {
-        "\u4eca\u5929": (0, today),
-        "\u6628\u5929": (1, yesterday),
+        "今天": (0, today),
+        "昨天": (1, yesterday),
         yesterday: (1, yesterday),
         before_yesterday: (2, before_yesterday),
         two_days_before: (3, two_days_before),
@@ -148,50 +152,104 @@ def _format_minutes(minutes: int) -> str:
     return f"{minutes // 60:02d}:{minutes % 60:02d}"
 
 
-def _looks_like_time_arg(value: str) -> bool:
-    separators = ["-", "~", "\u2013", "\u2014", "\u5230", "\u81f3"]
-    return ":" in value and (
-        bool(re.fullmatch(r"[0-2]?\d:[0-5]\d", value))
-        or any(sep in value for sep in separators)
+def _combine_local(date_str: str, minutes: int, *, end_of_minute: bool = False) -> datetime:
+    date_value = datetime.strptime(date_str, "%Y-%m-%d").date()
+    dt = datetime.combine(
+        date_value,
+        datetime.min.time(),
+        tzinfo=_get_local_tz(),
+    ) + timedelta(minutes=minutes)
+    if end_of_minute:
+        dt += timedelta(seconds=59, microseconds=999999)
+    return dt
+
+
+def _whole_day_range(date_str: str) -> tuple[datetime, datetime]:
+    return _combine_local(date_str, 0), _combine_local(date_str, 23 * 60 + 59, end_of_minute=True)
+
+
+def _range_label(start_dt: datetime, end_dt: datetime) -> str:
+    return f"{start_dt.strftime('%Y-%m-%d %H:%M')} 至 {end_dt.strftime('%Y-%m-%d %H:%M')}"
+
+
+def _time_range_pattern(date_count: int) -> re.Pattern:
+    sep = rf"(?:\s*{RANGE_SEPARATOR_PATTERN}\s*|\s+)"
+    if date_count == 2:
+        pattern = (
+            rf"^\s*(?P<start_date>{DATE_ARG_PATTERN})\s+"
+            rf"(?P<start_time>{TIME_ARG_PATTERN}){sep}"
+            rf"(?P<end_date>{DATE_ARG_PATTERN})\s+"
+            rf"(?P<end_time>{TIME_ARG_PATTERN})\s*$"
+        )
+    else:
+        pattern = (
+            rf"^\s*(?P<date>{DATE_ARG_PATTERN})\s+"
+            rf"(?P<start_time>{TIME_ARG_PATTERN}){sep}"
+            rf"(?P<end_time>{TIME_ARG_PATTERN})\s*$"
+        )
+    return re.compile(pattern)
+
+
+def _time_only_range_pattern() -> re.Pattern:
+    sep = rf"(?:\s*{RANGE_SEPARATOR_PATTERN}\s*|\s+)"
+    return re.compile(
+        rf"^\s*(?P<start_time>{TIME_ARG_PATTERN}){sep}(?P<end_time>{TIME_ARG_PATTERN})\s*$"
     )
 
 
-def _parse_time_range(args: list[str]) -> tuple[int | None, int | None, str]:
-    if not args:
-        return None, None, ""
+def _parse_summary_query(raw_message: str) -> tuple[str, datetime, datetime]:
+    """Parse /summary query. Defaults to yesterday, all day."""
+    query = raw_message.strip().split(maxsplit=1)
+    query = query[1].strip() if len(query) > 1 else ""
 
-    text = " ".join(args).strip()
-    for sep in ["-", "~", "\u2013", "\u2014", "\u5230", "\u81f3"]:
-        text = text.replace(sep, " ")
-    parts = [p for p in text.split() if p]
-    if len(parts) != 2:
-        raise ValueError("unsupported time range")
+    if not query:
+        date_str, label = _parse_date_arg("昨日")
+        start_dt, end_dt = _whole_day_range(date_str)
+        return label, start_dt, end_dt
 
-    start_min = _parse_hhmm(parts[0])
-    end_min = _parse_hhmm(parts[1])
-    if end_min < start_min:
-        raise ValueError("time range cannot cross midnight")
-    return start_min, end_min, f"{_format_minutes(start_min)}-{_format_minutes(end_min)}"
+    cross_day_match = _time_range_pattern(2).fullmatch(query)
+    if cross_day_match:
+        start_date, _ = _parse_date_arg(cross_day_match.group("start_date"))
+        end_date, _ = _parse_date_arg(cross_day_match.group("end_date"))
+        start_dt = _combine_local(start_date, _parse_hhmm(cross_day_match.group("start_time")))
+        end_dt = _combine_local(
+            end_date,
+            _parse_hhmm(cross_day_match.group("end_time")),
+            end_of_minute=True,
+        )
+        if end_dt < start_dt:
+            raise ValueError("time range end before start")
+        return _range_label(start_dt, end_dt), start_dt, end_dt
 
+    same_day_match = _time_range_pattern(1).fullmatch(query)
+    if same_day_match:
+        date_str, label = _parse_date_arg(same_day_match.group("date"))
+        start_min = _parse_hhmm(same_day_match.group("start_time"))
+        end_min = _parse_hhmm(same_day_match.group("end_time"))
+        if end_min < start_min:
+            raise ValueError("same-day time range cannot cross midnight")
+        start_dt = _combine_local(date_str, start_min)
+        end_dt = _combine_local(date_str, end_min, end_of_minute=True)
+        return f"{label} {_format_minutes(start_min)}-{_format_minutes(end_min)}", start_dt, end_dt
 
-def _parse_summary_query(raw_message: str) -> tuple[str, str, int | None, int | None]:
-    """Parse /summary [date] [time-range]. Defaults to yesterday, all day."""
-    args = raw_message.strip().split()[1:]
-    if not args:
-        date_str, label = _parse_date_arg("\u6628\u65e5")
-        return date_str, label, None, None
+    time_only_match = _time_only_range_pattern().fullmatch(query)
+    if time_only_match:
+        date_str, label = _parse_date_arg("今天")
+        start_min = _parse_hhmm(time_only_match.group("start_time"))
+        end_min = _parse_hhmm(time_only_match.group("end_time"))
+        if end_min < start_min:
+            raise ValueError("time range cannot cross midnight without an end date")
+        start_dt = _combine_local(date_str, start_min)
+        end_dt = _combine_local(date_str, end_min, end_of_minute=True)
+        return f"{label} {_format_minutes(start_min)}-{_format_minutes(end_min)}", start_dt, end_dt
 
-    if _looks_like_time_arg(args[0]):
-        date_str, label = _parse_date_arg("\u4eca\u5929")
-        time_args = args
-    else:
-        date_str, label = _parse_date_arg(args[0])
-        time_args = args[1:]
+    if re.fullmatch(DATE_ARG_PATTERN, query):
+        date_str, label = _parse_date_arg(query)
+        start_dt, end_dt = _whole_day_range(date_str)
+        return label, start_dt, end_dt
 
-    start_min, end_min, range_label = _parse_time_range(time_args)
-    if range_label:
-        label = f"{label} {range_label}"
-    return date_str, label, start_min, end_min
+    raise ValueError("unsupported summary query")
+
 
 @register("daily-summary", "WorkBuddy", "QQ群每日聊天总结：自动收集消息并生成每日摘要", "1.0.0",
           "https://github.com/245916893-maker/Chatbot")
@@ -214,7 +272,7 @@ class DailySummary(Star):
         while True:
             now = _now_local()
             target = datetime.strptime(self.config["summary_time"], "%H:%M").time()
-            target_dt = datetime.combine(now.date(), target)
+            target_dt = datetime.combine(now.date(), target, tzinfo=_get_local_tz())
 
             # 如果今天的目标时间还没到，等；否则等明天
             if now >= target_dt:
@@ -227,7 +285,7 @@ class DailySummary(Star):
             now = _now_local()
             today_str = now.strftime("%Y-%m-%d")
 
-            if self._last_run_date != today_str and now.hour == target.hour == now.hour:
+            if self._last_run_date != today_str and now.hour == target.hour and now.minute == target.minute:
                 self._last_run_date = today_str
                 await self._daily_run()
 
@@ -235,6 +293,7 @@ class DailySummary(Star):
         """执行每日总结"""
         yesterday = (_now_local() - timedelta(days=1)).strftime("%Y-%m-%d")
         logger.info("开始生成 %s 的每日总结", yesterday)
+        start_dt, end_dt = _whole_day_range(yesterday)
 
         groups = self.config["target_groups"]
         if not groups:
@@ -242,7 +301,7 @@ class DailySummary(Star):
 
         for gid in groups:
             try:
-                summary = await self._generate_summary(gid, yesterday, "昨日")
+                summary = await self._generate_summary(gid, start_dt, end_dt, "昨日")
                 if summary:
                     await self._send_to_group(gid, summary)
                     logger.info("已发送群 %s 的每日总结", gid)
@@ -276,30 +335,43 @@ class DailySummary(Star):
 
     @filter.command("summary")
     async def cmd_summary(self, event: AstrMessageEvent):
-        """Generate chat summary. Usage: /summary [date] [HH:MM-HH:MM]"""
+        """Generate chat summary. Usage: /summary [date] [HH:MM-HH:MM] or /summary [date HH:MM date HH:MM]."""
         gid = event.message_obj.group_id
         if not gid:
-            yield event.plain_result("\u26a0\ufe0f \u8bf7\u5728\u7fa4\u804a\u4e2d\u4f7f\u7528\u6b64\u547d\u4ee4")
+            yield event.plain_result("⚠️ 请在群聊中使用此命令")
             return
 
         try:
-            date_str, period_label, start_min, end_min = _parse_summary_query(event.message_str)
+            period_label, start_dt, end_dt = _parse_summary_query(event.message_str)
         except ValueError:
-            yield event.plain_result("\u26a0\ufe0f \u7528\u6cd5\uff1a/summary [\u6628\u65e5|\u524d\u5929|\u5927\u524d\u5929|YYYY-MM-DD|N\u5929\u524d] [HH:MM-HH:MM]")
+            yield event.plain_result(
+                "⚠️ 用法：/summary [昨日|前天|大前天|YYYY-MM-DD|N天前] [HH:MM-HH:MM]\n"
+                "或：/summary 起始日期 HH:MM 到 结束日期 HH:MM"
+            )
             return
 
-        yield event.plain_result(f"\U0001f914 \u6b63\u5728\u751f\u6210{period_label}\u804a\u5929\u603b\u7ed3\uff0c\u8bf7\u7a0d\u5019...")
+        yield event.plain_result(f"🤔 正在生成{period_label}聊天总结，请稍候...")
 
-        summary = await self._generate_summary(gid, date_str, period_label, start_min, end_min)
+        summary = await self._generate_summary(gid, start_dt, end_dt, period_label)
         if summary:
             yield event.plain_result(summary)
         else:
-            yield event.plain_result(f"\U0001f4ed {period_label}\u8be5\u7fa4\u65e0\u804a\u5929\u8bb0\u5f55")
+            yield event.plain_result(f"📭 {period_label}该群无聊天记录")
 
     @filter.command("summary_help")
     async def cmd_summary_help(self, event: AstrMessageEvent):
         """Show daily-summary usage."""
-        yield event.plain_result("\u7528\u6cd5\uff1a/summary [\u6628\u65e5|\u524d\u5929|\u5927\u524d\u5929|YYYY-MM-DD|N\u5929\u524d] [HH:MM-HH:MM]\n\u4f8b\u5982\uff1a/summary \u5927\u524d\u5929 14:00-16:30\n/summary 2026-05-24 14:00-15:30\n/summary \u4eca\u5929 14:00 \u5230 15:00\n/summary 14:00-15:00")
+        yield event.plain_result(
+            "用法：/summary [昨日|前天|大前天|YYYY-MM-DD|N天前] [HH:MM-HH:MM]\n"
+            "也可跨天：/summary 起始日期 HH:MM 到 结束日期 HH:MM\n"
+            "例如：/summary 大前天 14:00-16:30\n"
+            "/summary 2026-05-24 14:00-15:30\n"
+            "/summary 今天 14:00 到 15:00\n"
+            "/summary 14:00-15:00\n"
+            "/summary 前天 22:30 到 今天 01:15\n"
+            "/summary 2026-05-23 22:30 到 2026-05-24 01:15"
+        )
+
     @filter.command("zongjie")
     async def cmd_zongjie(self, event: AstrMessageEvent):
         """手动生成昨日聊天总结（中文别名）"""
@@ -337,10 +409,9 @@ class DailySummary(Star):
     async def _generate_summary(
         self,
         group_id: str,
-        date_str: str,
+        start_dt: datetime,
+        end_dt: datetime,
         period_label: str | None = None,
-        start_min: int | None = None,
-        end_min: int | None = None,
     ) -> str | None:
         conn = sqlite3.connect(str(DB_PATH))
         cursor = conn.execute(
@@ -350,12 +421,7 @@ class DailySummary(Star):
         msgs = []
         for user_name, content, timestamp in cursor.fetchall():
             local_dt = _timestamp_to_local(timestamp)
-            if local_dt.strftime("%Y-%m-%d") != date_str:
-                continue
-            minutes = local_dt.hour * 60 + local_dt.minute
-            if start_min is not None and minutes < start_min:
-                continue
-            if end_min is not None and minutes > end_min:
+            if local_dt < start_dt or local_dt > end_dt:
                 continue
             msgs.append({"user_name": user_name, "content": content, "timestamp": timestamp})
         conn.close()
@@ -366,7 +432,7 @@ class DailySummary(Star):
         if len(msgs) > 500:
             msgs = msgs[-500:]
 
-        prompt = _build_summary_prompt(msgs, period_label or date_str)
+        prompt = _build_summary_prompt(msgs, period_label or _range_label(start_dt, end_dt))
         summary = await self._call_llm(prompt)
         return summary
 

@@ -4,8 +4,8 @@
 
 ## 架构
 
-```
-QQ 群 ←→ NapCat (QQ 协议桥接) ←→ AstrBot (AI 处理) ←→ LLM API
+```text
+QQ 群 <-> NapCat (QQ 协议桥接) <-> AstrBot (AI 处理) <-> LLM API
 ```
 
 ## 前置条件
@@ -40,7 +40,7 @@ docker compose up -d
 # 5. 配置 AstrBot 连接 NapCat
 # 浏览器打开 http://<NAS_IP>:3000
 # 默认账密: astrbot / astrbot
-# 左侧「消息平台」→ 添加 → OneBot v11
+# 左侧「消息平台」-> 添加 -> OneBot v11
 # 地址填: ws://napcat:6099
 ```
 
@@ -54,11 +54,17 @@ docker compose up -d
 | `/summary 2026-05-24 14:00-15:30` | 手动生成指定日期、指定时间段的聊天总结 |
 | `/summary 今天 14:00 到 15:30` | 手动生成今天指定时间段的聊天总结 |
 | `/summary 14:00-15:00` | 手动生成今天指定时间段的聊天总结 |
+| `/summary 前天 22:30 到 今天 01:15` | 手动生成跨相对日期、指定起止时间的聊天总结 |
+| `/summary 2026-05-23 22:30 到 2026-05-24 01:15` | 手动生成跨自然日期、指定起止时间的聊天总结 |
 | `/summary_help` | 查看手动总结命令用法 |
 | `/zongjie` | 同上（中文别名） |
 | `/summary_config` | 查看当前配置 |
 | `/summary_config api_key sk-xxx` | 设置 LLM API Key |
 | `/summary_config summary_time 09:00` | 设置每日推送时间 |
+
+日期参数支持：`今天`、`昨天`、`昨日`、`前天`、`大前天`、`N天前`、`YYYY-MM-DD`。
+
+时间段支持：`HH:MM-HH:MM`、`HH:MM 到 HH:MM`、`起始日期 HH:MM 到 结束日期 HH:MM`。如果需要跨午夜，请写明结束日期，例如 `/summary 昨天 23:00 到 今天 01:00`。
 
 ## 配置项
 
@@ -98,37 +104,37 @@ docker compose up -d
 
 ## 目录结构
 
-```
+```text
 qq-group-summary-bot/
-├── docker-compose.yml          # 双容器编排
-├── .env.example                # 环境变量模板
+├── docker-compose.yml
+├── .env.example
 ├── plugins/
-│   └── daily-summary/          # 每日总结插件
+│   └── daily-summary/
 │       ├── metadata.yaml
 │       ├── __init__.py
-│       ├── main.py             # 插件主逻辑
-│       ├── config.json         # 运行时配置（自动生成）
+│       ├── main.py
+│       ├── config.json
 │       └── data/
-│           └── messages.db     # SQLite 消息数据库
-├── napcat/                     # NapCat 持久化数据（自动生成）
-│   ├── data/
-│   └── QQ/
-└── astrbot/                    # AstrBot 持久化数据（自动生成）
-    └── data/
+│           └── messages.db
+├── napcat/
+└── astrbot/
 ```
 
 ## 故障排查
 
 ### 机器人收不到群消息
-1. 确认 NapCat 已扫码登录且在线
-2. 确认机器人 QQ 号已在目标群中
-3. 检查 NapCat 容器日志：`docker logs napcat`
+
+1. 确认 NapCat 已扫码登录且在线。
+2. 确认机器人 QQ 号已在目标群中。
+3. 检查 NapCat 容器日志：`docker logs napcat`。
 
 ### 总结不生成
-1. 检查 LLM API Key 是否正确：`/summary_config`
-2. 手动触发测试：`/summary`
-3. 查看 AstrBot 日志：`docker logs astrbot`
+
+1. 检查 LLM API Key 是否正确：`/summary_config`。
+2. 手动触发测试：`/summary`。
+3. 查看 AstrBot 日志：`docker logs astrbot`。
 
 ### 插件没加载
-1. 确认 `plugins/daily-summary/main.py` 存在
-2. 重启 AstrBot：`docker compose restart astrbot`
+
+1. 确认 `plugins/daily-summary/main.py` 存在。
+2. 重启 AstrBot：`docker compose restart astrbot`。
