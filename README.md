@@ -48,7 +48,13 @@ docker compose up -d
 
 | 命令 | 说明 |
 |------|------|
-| `/summary` | 手动生成昨日聊天总结 |
+| `/summary` | 手动生成昨日全天聊天总结 |
+| `/summary 前天` | 手动生成前天全天聊天总结 |
+| `/summary 大前天` | 手动生成大前天全天聊天总结 |
+| `/summary 2026-05-24 14:00-15:30` | 手动生成指定日期、指定时间段的聊天总结 |
+| `/summary 今天 14:00 到 15:30` | 手动生成今天指定时间段的聊天总结 |
+| `/summary 14:00-15:00` | 手动生成今天指定时间段的聊天总结 |
+| `/summary_help` | 查看手动总结命令用法 |
 | `/zongjie` | 同上（中文别名） |
 | `/summary_config` | 查看当前配置 |
 | `/summary_config api_key sk-xxx` | 设置 LLM API Key |
@@ -66,7 +72,8 @@ docker compose up -d
   "model": "deepseek-chat",
   "max_tokens": 2000,
   "temperature": 0.7,
-  "target_groups": []
+  "target_groups": [],
+  "timezone": "Asia/Shanghai"
 }
 ```
 
@@ -78,6 +85,7 @@ docker compose up -d
 | `model` | 模型名称 |
 | `max_tokens` | 最大输出 token 数 |
 | `target_groups` | 指定推送的群 ID 列表，空数组=所有群 |
+| `timezone` | 解析手动命令时间段和定时任务的时区，默认 `Asia/Shanghai` |
 
 ## 支持的 LLM
 
