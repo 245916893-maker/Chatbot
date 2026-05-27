@@ -2,7 +2,7 @@
 
 更新时间：2026-05-27 22:05 左右
 
-> 这是可同步到 GitHub 的脱敏版项目记忆。不要在本文件中记录 SSH 密码、API Key、OpenViking key、NapCat token、AstrBot 密码或其他敏感凭据。
+> 这是本地项目记忆。不要在本文件中记录 SSH 密码、API Key、OpenViking key、NapCat token、AstrBot 密码或其他敏感凭据；同步到 GitHub 前必须额外脱敏 NAS 地址、QQ 号等信息。
 
 ## 项目目标
 
@@ -166,6 +166,8 @@
   - `group_messages_delta` 现在把历史消息格式化为 `昵称(QQ:号码)/时间`。
   - 每次 LLM 请求前新增 `<current_group_message_sender>` 上下文，明确当前群、当前提问者昵称、当前提问者 QQ，并提示识别当前提问者时优先使用 QQ 号。
   - 已在容器内验证身份格式：`看到我请叫我少吃点2(QQ:<USER_QQ_A>)`，当前提问者 QQ 为 `<USER_QQ_A>`。
+  - 已同步到 GitHub `main`，提交：`40049d778ad16e5e57269d488294c8775db04bcd fix: route stock queries and include qq identity`。
+  - GitHub 上的 `PROJECT_MEMORY.md` 使用脱敏版，替换了 NAS 地址、SSH 用户、QQ 号、群号等隐私信息。
 - 2026-05-24 15:03 左右已把群 `<GROUP_ID_2>` 加入 `plugins/daily-summary/config.json` 的 `target_groups`。
   - 当前目标群：`<GROUP_ID_1>`, `<GROUP_ID_2>`
   - 备份文件：`<NAS_DEPLOY_DIR>/plugins/daily-summary/config.json.bak-20260524-150328`
