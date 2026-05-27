@@ -61,6 +61,10 @@ docker compose up -d
 | `/summary_config` | 查看当前配置 |
 | `/summary_config api_key sk-xxx` | 设置 LLM API Key |
 | `/summary_config summary_time 09:00` | 设置每日推送时间 |
+| `/market` 或 `/股市` | 免费查询今日 A 股三大指数实时概览 |
+| `/stock 600519` | 免费按股票代码查询个股行情 |
+| `/stock 贵州茅台` | 免费按股票名称查询个股行情 |
+| `/stock_help` | 查看免费行情命令用法 |
 
 日期参数支持：`今天`、`昨天`、`昨日`、`前天`、`大前天`、`N天前`、`YYYY-MM-DD`。
 
@@ -102,6 +106,27 @@ docker compose up -d
 | OpenAI | `https://api.openai.com/v1` | `gpt-4o-mini` |
 | 其他兼容接口 | 按实际填写 | 按实际填写 |
 
+## 免费行情查询
+
+仓库包含 `plugins/stock-market` 插件，可在不购买搜索 API 的情况下查询 A 股公开行情。
+
+- 主要数据源：腾讯财经公开行情接口。
+- 可选补充：东方财富公开行情接口用于尝试获取市场广度；如果返回不完整，插件会自动省略涨跌家数，避免误导。
+- AkShare 可安装在运行环境中作为扩展数据源，但公开数据源没有 SLA，接口可能因源站策略变化而失效。
+
+示例：
+
+```text
+/market
+/股市
+/stock 600519
+/stock 贵州茅台
+```
+
+也可以在群里 @机器人 说“今天股市怎么样”，插件会尝试识别并返回 A 股概览。
+
+公开免费行情可能存在延迟，仅供群聊参考，不构成投资建议。
+
 ## 目录结构
 
 ```text
@@ -116,6 +141,10 @@ qq-group-summary-bot/
 │       ├── config.json
 │       └── data/
 │           └── messages.db
+│   └── stock-market/
+│       ├── metadata.yaml
+│       ├── __init__.py
+│       └── main.py
 ├── napcat/
 └── astrbot/
 ```

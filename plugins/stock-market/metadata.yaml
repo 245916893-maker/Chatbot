@@ -1,0 +1,5 @@
+name: stock-market
+desc: "免费股票行情插件：通过腾讯财经公开接口查询 A 股指数和个股行情"
+version: 1.0.0
+author: WorkBuddy
+repo: https://github.com/245916893-maker/Chatbot
