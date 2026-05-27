@@ -2,7 +2,7 @@
 
 更新时间：2026-05-27 22:05 左右
 
-> 这是本地项目记忆。不要在本文件中记录 SSH 密码、API Key、OpenViking key、NapCat token、AstrBot 密码或其他敏感凭据；同步到 GitHub 前必须额外脱敏 NAS 地址、QQ 号等信息。
+> 这是可同步到 GitHub 的脱敏版项目记忆。不要在本文件中记录 SSH 密码、API Key、OpenViking key、NapCat token、AstrBot 密码或其他敏感凭据。
 
 ## 项目目标
 
