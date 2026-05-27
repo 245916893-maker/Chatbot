@@ -38,6 +38,30 @@ INDEX_SECIDS = {
 INDEX_SYMBOLS = ["sh000001", "sz399001", "sz399006"]
 QUOTE_FIELDS = "f12,f13,f14,f2,f3,f4,f5,f6,f15,f16,f17,f18,f20,f21"
 ALL_A_FS = "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23"
+DIRECT_STOCK_COMMANDS = ("/stock", "/股票")
+DIRECT_MARKET_COMMANDS = ("/market", "/gushi", "/股市", "/行情", "/大盘")
+DIRECT_HELP_COMMANDS = ("/stock_help", "/行情帮助")
+MARKET_QUERY_RE = re.compile(r"(A股|股市|大盘|三大指数|上证指数|深证成指|创业板指)", re.I)
+STOCK_QUERY_HINT_RE = re.compile(
+    r"(\d{6}|股票|股价|个股|报价|行情|涨跌幅|多少钱|多少|价格|"
+    r"查|查询|看看|看一下|走势|怎么样|如何|涨|跌)",
+    re.I,
+)
+STOCK_QUERY_STOP_RE = re.compile(
+    r"(帮我|请|查询|查一下|看看|看一下|今天|今日|实时|现在|目前|一下|"
+    r"股票|股价|个股|报价|行情|走势|涨跌幅|怎么样|如何|多少|多少钱|"
+    r"机器人|凉凉|的|吗|呢|吧|呀|啊|谢谢)",
+    re.I,
+)
+MARKET_TOKEN_BLACKLIST = {
+    "A股",
+    "股市",
+    "大盘",
+    "三大指数",
+    "上证指数",
+    "深证成指",
+    "创业板指",
+}
 
 
 @dataclass
@@ -207,6 +231,54 @@ def _tencent_search_code(query: str) -> str | None:
     return None
 
 
+def _clean_message_text(text: str) -> str:
+    text = re.sub(r"\[At:\d+\]", " ", str(text or ""))
+    text = text.replace("\u3000", " ")
+    return " ".join(text.strip().split())
+
+
+def _parse_direct_command(text: str) -> tuple[str, str] | None:
+    cleaned = _clean_message_text(text)
+    lowered = cleaned.lower()
+    command_groups = [
+        ("help", DIRECT_HELP_COMMANDS),
+        ("stock", DIRECT_STOCK_COMMANDS),
+        ("market", DIRECT_MARKET_COMMANDS),
+    ]
+    for kind, commands in command_groups:
+        for command in sorted(commands, key=len, reverse=True):
+            command_lower = command.lower()
+            if lowered == command_lower:
+                return kind, ""
+            if lowered.startswith(command_lower):
+                rest = cleaned[len(command):].strip(" \t\r\n:：,，")
+                return kind, rest
+    return None
+
+
+def _guess_stock_query(text: str) -> str | None:
+    cleaned = _clean_message_text(text)
+    code_match = re.search(r"\b(\d{6})\b", cleaned)
+    if code_match:
+        return code_match.group(1)
+
+    if MARKET_QUERY_RE.search(cleaned) and not re.search(r"(个股|股票|股价|\d{6})", cleaned):
+        return None
+    if not STOCK_QUERY_HINT_RE.search(cleaned):
+        return None
+
+    candidate = STOCK_QUERY_STOP_RE.sub(" ", cleaned)
+    candidate = re.sub(r"[^\u4e00-\u9fffA-Za-z0-9]+", " ", candidate)
+    tokens = [
+        token
+        for token in candidate.split()
+        if len(token) >= 2 and token not in MARKET_TOKEN_BLACKLIST
+    ]
+    if not tokens:
+        return None
+    return max(tokens, key=len)
+
+
 def _secid_for_code(code: str) -> str:
     if code.startswith(("5", "6", "9")) or code.startswith(("11", "13")):
         return f"1.{code}"
@@ -348,34 +420,54 @@ class StockMarketPlugin(Star):
         super().__init__(context)
         self.data = StockData()
 
-    @filter.command("market")
-    @filter.command("gushi")
-    @filter.command("股市")
+    def _log_handled(self, event: AstrMessageEvent, kind: str, text: str = "") -> None:
+        logger.info(
+            "[stock-market] handled %s sender=%s/%s group=%s text=%s",
+            kind,
+            event.get_sender_name(),
+            event.get_sender_id(),
+            event.get_group_id(),
+            _clean_message_text(text)[:120],
+        )
+
+    def _stop_plain_result(self, event: AstrMessageEvent, text: str):
+        result = event.plain_result(text)
+        result.stop_event()
+        event.stop_event()
+        return result
+
+    async def _build_market_report(self) -> str:
+        try:
+            return await asyncio.to_thread(self.data.market_overview)
+        except Exception as exc:
+            logger.error("[stock-market] market overview failed: %s", exc)
+            return f"行情获取失败：{exc}"
+
+    async def _build_stock_report(self, query: str) -> str:
+        try:
+            return await asyncio.to_thread(self.data.stock_quote, query)
+        except Exception as exc:
+            logger.error("[stock-market] stock quote failed: %s", exc)
+            return f"个股行情获取失败：{exc}"
+
+    @filter.command("market", alias={"gushi", "股市", "行情", "大盘"})
     async def cmd_market(self, event: AstrMessageEvent):
         """查询今日 A 股概览。"""
         yield event.plain_result("正在获取免费实时行情，请稍候...")
-        try:
-            report = await asyncio.to_thread(self.data.market_overview)
-        except Exception as exc:
-            logger.error("[stock-market] market overview failed: %s", exc)
-            report = f"行情获取失败：{exc}"
+        self._log_handled(event, "command_market", event.message_str)
+        report = await self._build_market_report()
         yield event.plain_result(report)
 
-    @filter.command("stock")
-    @filter.command("股票")
+    @filter.command("stock", alias={"股票"})
     async def cmd_stock(self, event: AstrMessageEvent):
         """查询个股行情。"""
         parts = event.message_str.strip().split(maxsplit=1)
         query = parts[1] if len(parts) > 1 else ""
-        try:
-            report = await asyncio.to_thread(self.data.stock_quote, query)
-        except Exception as exc:
-            logger.error("[stock-market] stock quote failed: %s", exc)
-            report = f"个股行情获取失败：{exc}"
+        self._log_handled(event, "command_stock", event.message_str)
+        report = await self._build_stock_report(query)
         yield event.plain_result(report)
 
-    @filter.command("stock_help")
-    @filter.command("行情帮助")
+    @filter.command("stock_help", alias={"行情帮助"})
     async def cmd_stock_help(self, event: AstrMessageEvent):
         yield event.plain_result(
             "免费行情命令：\n"
@@ -385,22 +477,67 @@ class StockMarketPlugin(Star):
             "也可以 @机器人 说「今天股市怎么样」。"
         )
 
+    @filter.llm_tool(name="stock_market_overview")
+    async def tool_market_overview(self, event: AstrMessageEvent) -> str:
+        """获取今日 A 股实时概览。
+        """
+        self._log_handled(event, "llm_tool_market", event.message_str)
+        return await self._build_market_report()
+
+    @filter.llm_tool(name="stock_quote")
+    async def tool_stock_quote(self, event: AstrMessageEvent, query: str) -> str:
+        """查询 A 股个股实时行情。
+
+        Args:
+            query(string): 股票名称、简称或 6 位代码，例如 贵州茅台 或 600519。
+        """
+        self._log_handled(event, "llm_tool_stock", event.message_str)
+        return await self._build_stock_report(query)
+
+    @filter.event_message_type(filter.EventMessageType.GROUP_MESSAGE, priority=99999)
+    async def on_direct_stock_command(self, event: AstrMessageEvent):
+        """稳妥拦截 /stock、/market 等行情命令，避免落入默认 LLM。"""
+        parsed = _parse_direct_command(event.message_str)
+        if not parsed:
+            return
+
+        kind, arg = parsed
+        self._log_handled(event, f"direct_{kind}", event.message_str)
+        if kind == "help":
+            yield self._stop_plain_result(
+                event,
+                "免费行情命令：\n"
+                "/market 或 /股市：查看今日 A 股概览\n"
+                "/stock 600519：查看个股行情\n"
+                "/stock 贵州茅台：按股票名称查询\n"
+                "也可以 @机器人 说「今天股市怎么样」或「贵州茅台今天怎么样」。",
+            )
+            return
+        if kind == "market":
+            report = await self._build_market_report()
+            yield self._stop_plain_result(event, report)
+            return
+        report = await self._build_stock_report(arg)
+        yield self._stop_plain_result(event, report)
+
     @filter.event_message_type(filter.EventMessageType.GROUP_MESSAGE)
     async def on_group_market_question(self, event: AstrMessageEvent):
-        """被 @ 时，识别自然语言股市查询。"""
+        """被 @ 或唤醒时，识别自然语言股市和个股查询。"""
         if not getattr(event, "is_at_or_wake_command", False):
             return
         text = event.message_str.strip()
         if text.startswith("/"):
             return
+
+        stock_query = _guess_stock_query(text)
+        if stock_query:
+            self._log_handled(event, "natural_stock", text)
+            report = await self._build_stock_report(stock_query)
+            yield self._stop_plain_result(event, report)
+            return
         if not re.search(r"(今天|今日|实时|现在)?\s*(A股|股市|大盘|行情)", text, re.I):
             return
 
-        try:
-            report = await asyncio.to_thread(self.data.market_overview)
-        except Exception as exc:
-            logger.error("[stock-market] natural market query failed: %s", exc)
-            report = f"行情获取失败：{exc}"
-        result = event.plain_result(report)
-        result.stop_event()
-        yield result
+        self._log_handled(event, "natural_market", text)
+        report = await self._build_market_report()
+        yield self._stop_plain_result(event, report)
