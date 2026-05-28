@@ -43,13 +43,22 @@ DIRECT_MARKET_COMMANDS = ("/market", "/gushi", "/股市", "/行情", "/大盘")
 DIRECT_HELP_COMMANDS = ("/stock_help", "/行情帮助")
 MARKET_QUERY_RE = re.compile(r"(A股|股市|大盘|三大指数|上证指数|深证成指|创业板指)", re.I)
 STOCK_QUERY_HINT_RE = re.compile(
-    r"(\d{6}|股票|股价|个股|报价|行情|涨跌幅|多少钱|多少|价格|"
-    r"查|查询|看看|看一下|走势|怎么样|如何|涨|跌)",
+    r"(\d{6}|A股|股票|股价|个股|报价|行情|涨跌幅|多少钱|价格|"
+    r"走势|涨停|跌停|买入|卖出|持仓|涨|跌)",
+    re.I,
+)
+STOCK_NAME_QUESTION_RE = re.compile(r"(怎么样|怎样|如何|咋样|能买吗|能不能买|值得买吗)", re.I)
+NON_STOCK_CONTEXT_RE = re.compile(
+    r"(天气|气温|温度|下雨|降雨|台风|空气|湿度|预报|穿衣|刮风|阴天|晴天|多云|"
+    r"炒股炒疯|老想着股票|不是问股票|别查股票|不要查股票)",
     re.I,
 )
 STOCK_QUERY_STOP_RE = re.compile(
     r"(帮我|请|查询|查一下|看看|看一下|今天|今日|实时|现在|目前|一下|"
-    r"股票|股价|个股|报价|行情|走势|涨跌幅|怎么样|如何|多少|多少钱|"
+    r"股票|股价|个股|报价|行情|走势|涨跌幅|怎么样|怎样|如何|咋样|多少|多少钱|"
+    r"价格|涨停|跌停|买入|卖出|持仓|涨了吗|跌了吗|涨|跌|"
+    r"天气|气温|温度|下雨|降雨|台风|空气|湿度|预报|穿衣|刮风|阴天|晴天|多云|"
+    r"炒股|炒股炒疯|老想着|想着|问你|人家|你是不是|你怎么|怎么|疯了|"
     r"机器人|凉凉|的|吗|呢|吧|呀|啊|谢谢)",
     re.I,
 )
@@ -61,6 +70,11 @@ MARKET_TOKEN_BLACKLIST = {
     "上证指数",
     "深证成指",
     "创业板指",
+    "天气",
+    "气温",
+    "温度",
+    "炒股",
+    "股票",
 }
 
 
@@ -264,7 +278,11 @@ def _guess_stock_query(text: str) -> str | None:
 
     if MARKET_QUERY_RE.search(cleaned) and not re.search(r"(个股|股票|股价|\d{6})", cleaned):
         return None
-    if not STOCK_QUERY_HINT_RE.search(cleaned):
+    has_stock_hint = bool(STOCK_QUERY_HINT_RE.search(cleaned))
+    has_name_question = bool(STOCK_NAME_QUESTION_RE.search(cleaned))
+    if NON_STOCK_CONTEXT_RE.search(cleaned) and not has_stock_hint:
+        return None
+    if not has_stock_hint and not has_name_question:
         return None
 
     candidate = STOCK_QUERY_STOP_RE.sub(" ", cleaned)
@@ -272,7 +290,9 @@ def _guess_stock_query(text: str) -> str | None:
     tokens = [
         token
         for token in candidate.split()
-        if len(token) >= 2 and token not in MARKET_TOKEN_BLACKLIST
+        if len(token) >= 2
+        and token not in MARKET_TOKEN_BLACKLIST
+        and not NON_STOCK_CONTEXT_RE.search(token)
     ]
     if not tokens:
         return None
@@ -531,8 +551,16 @@ class StockMarketPlugin(Star):
 
         stock_query = _guess_stock_query(text)
         if stock_query:
+            code = await asyncio.to_thread(self.data._resolve_code, stock_query)
+            if not code:
+                logger.info(
+                    "[stock-market] ignored unresolved natural stock candidate=%s text=%s",
+                    stock_query,
+                    _clean_message_text(text)[:120],
+                )
+                return
             self._log_handled(event, "natural_stock", text)
-            report = await self._build_stock_report(stock_query)
+            report = await self._build_stock_report(code)
             yield self._stop_plain_result(event, report)
             return
         if not re.search(r"(今天|今日|实时|现在)?\s*(A股|股市|大盘|行情)", text, re.I):

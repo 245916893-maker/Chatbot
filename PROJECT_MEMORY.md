@@ -1,8 +1,8 @@
 # QQ 群每日聊天总结机器人项目记忆
 
-更新时间：2026-05-27 22:05 左右
+更新时间：2026-05-28 19:05 左右
 
-> 这是可同步到 GitHub 的脱敏版项目记忆。不要在本文件中记录 SSH 密码、API Key、OpenViking key、NapCat token、AstrBot 密码或其他敏感凭据。
+> ?????? GitHub ?????????????????? SSH ???API Key?OpenViking key?NapCat token?AstrBot ??????????
 
 ## 项目目标
 
@@ -168,6 +168,18 @@
   - 已在容器内验证身份格式：`看到我请叫我少吃点2(QQ:<USER_QQ_A>)`，当前提问者 QQ 为 `<USER_QQ_A>`。
   - 已同步到 GitHub `main`，提交：`40049d778ad16e5e57269d488294c8775db04bcd fix: route stock queries and include qq identity`。
   - GitHub 上的 `PROJECT_MEMORY.md` 使用脱敏版，替换了 NAS 地址、SSH 用户、QQ 号、群号等隐私信息。
+- 2026-05-28 19:05 左右修复 `stock-market` 自然语言误触发问题：
+  - 现象：群内 `@机器人 今天天气怎么样` 被误判为股票查询，回复“没找到「天气」对应的 A 股股票”；追问“你是不是炒股炒疯了”也会因为包含“股票/炒股”被误判。
+  - 原因：`_guess_stock_query()` 把“怎么样/如何/涨/跌”等通用词作为股票触发词，清洗后把“天气”“你怎么”等非股票词当成候选股票名。
+  - 修复：收紧 `STOCK_QUERY_HINT_RE`，新增 `STOCK_NAME_QUESTION_RE` 与 `NON_STOCK_CONTEXT_RE`，把天气、气温、预报、炒股吐槽等上下文排除。
+  - 修复：自然语言股票候选词必须先能解析到真实 A 股代码；解析不到就放行给默认 LLM，不再由股票插件回复“没找到股票”。
+  - 已验证：
+    - `@机器人 今天天气怎么样` -> 股票候选为 `None`。
+    - `@机器人 人家问你天气怎样，你怎么老想着股票呢，你是不是炒股炒疯了` -> 股票候选为 `None`。
+    - `@机器人 贵州茅台今天怎么样` -> 候选为 `贵州茅台`。
+    - `@机器人 新易盛现在多少钱` -> 候选为 `新易盛`。
+    - `/stock 贵州茅台` -> 仍解析为直接股票命令。
+  - 已部署到 NAS 并重启 AstrBot；日志显示 `stock_market_overview`、`stock_quote` 工具注册成功，OneBot v11 已连接。
 - 2026-05-24 15:03 左右已把群 `<GROUP_ID_2>` 加入 `plugins/daily-summary/config.json` 的 `target_groups`。
   - 当前目标群：`<GROUP_ID_1>`, `<GROUP_ID_2>`
   - 备份文件：`<NAS_DEPLOY_DIR>/plugins/daily-summary/config.json.bak-20260524-150328`
