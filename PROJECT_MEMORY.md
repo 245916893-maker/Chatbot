@@ -180,6 +180,9 @@
     - `@机器人 新易盛现在多少钱` -> 候选为 `新易盛`。
     - `/stock 贵州茅台` -> 仍解析为直接股票命令。
   - 已部署到 NAS 并重启 AstrBot；日志显示 `stock_market_overview`、`stock_quote` 工具注册成功，OneBot v11 已连接。
+  - 已同步到 GitHub `main`：
+    - `cde38a4ea187b303e2a40106191292efc2dc4d75 fix: avoid stock plugin false positives`
+    - `dcf16a718d504b8fa92d9a5d319fbfdfa53fd85f docs: fix sanitized memory encoding`
 - 2026-05-24 15:03 左右已把群 `<GROUP_ID_2>` 加入 `plugins/daily-summary/config.json` 的 `target_groups`。
   - 当前目标群：`<GROUP_ID_1>`, `<GROUP_ID_2>`
   - 备份文件：`<NAS_DEPLOY_DIR>/plugins/daily-summary/config.json.bak-20260524-150328`
